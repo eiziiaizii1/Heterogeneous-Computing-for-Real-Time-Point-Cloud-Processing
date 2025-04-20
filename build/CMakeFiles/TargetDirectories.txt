@@ -1,3 +1,0 @@
-/home/azizo/PointCloudProcessing/build/CMakeFiles/voxel_downsample.dir
-/home/azizo/PointCloudProcessing/build/CMakeFiles/edit_cache.dir
-/home/azizo/PointCloudProcessing/build/CMakeFiles/rebuild_cache.dir
