@@ -22,15 +22,17 @@ link_directories(${PCL_LIBRARY_DIRS})
 # Add definitions
 add_definitions(${PCL_DEFINITIONS})
 
-# Create executable
+# Create serial version
+add_executable(voxel_grid_serial voxel_grid_serial.cpp)
+target_link_libraries(voxel_grid_serial ${PCL_LIBRARIES})
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(voxel_grid_serial OpenMP::OpenMP_CXX)
+endif()
+
+
+# Create OpenMP version
 add_executable(voxel_grid_omp voxel_grid_omp.cpp)
-
-# Link libraries
-target_link_libraries(voxel_grid_omp
-    ${PCL_LIBRARIES}
-)
-
-# Add OpenMP if found
+target_link_libraries(voxel_grid_omp ${PCL_LIBRARIES})
 if(OpenMP_CXX_FOUND)
     target_link_libraries(voxel_grid_omp OpenMP::OpenMP_CXX)
 endif()

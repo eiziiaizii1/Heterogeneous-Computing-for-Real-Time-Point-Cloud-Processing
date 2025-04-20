@@ -18,3 +18,19 @@ Use profiling and monitoring tools to analyze performance bottlenecks, optimize 
 
 Demonstrate practical applicability by testing the system using publicly available LiDAR datasets (e.g., KITTI, NuScenes).
 
+
+# 
+
+- Build and Compile
+```bash
+mkdir build
+cd build
+cmake ..
+make
+```
+
+- To run
+```bash
+cd build
+./voxel_downsample --input path/to/pointcloud.pcd --output downsampled.pcd --voxel-size 0.1
+```
