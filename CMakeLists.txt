@@ -23,14 +23,14 @@ link_directories(${PCL_LIBRARY_DIRS})
 add_definitions(${PCL_DEFINITIONS})
 
 # Create executable
-add_executable(voxel_downsample voxel_downsample.cpp)
+add_executable(voxel_grid_omp voxel_grid_omp.cpp)
 
 # Link libraries
-target_link_libraries(voxel_downsample
+target_link_libraries(voxel_grid_omp
     ${PCL_LIBRARIES}
 )
 
 # Add OpenMP if found
 if(OpenMP_CXX_FOUND)
-    target_link_libraries(voxel_downsample OpenMP::OpenMP_CXX)
+    target_link_libraries(voxel_grid_omp OpenMP::OpenMP_CXX)
 endif()
