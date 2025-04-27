@@ -1,27 +1,37 @@
-# Heterogeneous-Computing-for-Real-Time-Point-Cloud-Processing
-Parallel Programming-1 project
-Description: This project investigates heterogeneous computing systems combining CPUs, GPUs to optimize real-time processing of LiDAR point-cloud data. It aims to propose and implement efficient methods for dynamic workload distribution, ensuring maximum performance and responsiveness. The project will specifically focus on computationally intensive operations like data pre-processing, feature extraction, clustering, segmentation, and simple object detection to highlight the advantages of using heterogeneous systems.
+# Heterogeneous Computing for Real-Time Point Cloud Processing
 
-Motivation: Efficient real-time processing of LiDAR data is increasingly critical for autonomous vehicles, robotic navigation systems, smart-city infrastructures, and disaster response operations. Real-time processing demands high computational power and low latency, making heterogeneous computing systems essential to handle massive datasets promptly.
+## Overview
+This project leverages heterogeneous computing systems (CPU+GPU) to optimize real-time processing of LiDAR point cloud data. The implementation focuses on efficient workload distribution across hardware platforms to ensure maximum performance and responsiveness for computationally intensive operations such as data pre-processing, feature extraction, clustering, segmentation, and object detection.
 
-Key Objectives:
+## Motivation
+Real-time processing of LiDAR data is crucial for:
+- Autonomous vehicles
+- Robotic navigation systems
+- Smart-city infrastructures
+- Disaster response operations
 
-Identify and implement suitable algorithms for LiDAR point-cloud processing that are optimized for heterogeneous computing environments.
+These applications demand high computational power with low latency, making heterogeneous computing architectures ideal for handling massive point cloud datasets promptly and efficiently.
 
-Develop effective workload distribution and scheduling strategies to efficiently balance computational loads across CPUs, GPUs, and accelerators.
+## Key Objectives
+- Implement point cloud processing algorithms optimized for heterogeneous computing environments
+- Develop effective workload distribution strategies across CPUs, GPUs, and accelerators
+- Integrate frameworks like OpenCL and CUDA to facilitate seamless collaboration among computing resources
+- Benchmark system performance (throughput, latency, scalability, and resource utilization)
+- Use profiling tools to identify and resolve performance bottlenecks
+- Validate the system using standard LiDAR datasets (KITTI, NuScenes)
 
-Integrate software frameworks or middleware (e.g., OpenCL, CUDA) to facilitate seamless collaboration among diverse computing resources.
+## Getting Started
 
-Perform extensive benchmarking to evaluate system performance in terms of throughput, latency, scalability, and resource utilization.
+### Prerequisites
+- **CMake** ≥ 3.24
+- **C++ Compiler** supporting C++17
+- **GCC/G++** 11.4.0
+- **CUDA Toolkit** ≥ 12.4
+- **OpenMP** 4.5+
+- **PCL (Point Cloud Library)** ≥ 1.8
+- **Eigen3** (recent version)
 
-Use profiling and monitoring tools to analyze performance bottlenecks, optimize algorithms, and improve overall efficiency.
-
-Demonstrate practical applicability by testing the system using publicly available LiDAR datasets (e.g., KITTI, NuScenes).
-
-
-# 
-
-- Build and Compile
+### Building the Project
 ```bash
 mkdir build
 cd build
@@ -29,8 +39,18 @@ cmake ..
 make
 ```
 
-- To run
+### Running the Application
 ```bash
 cd build
-./voxel_downsample --input path/to/pointcloud.pcd --output downsampled.pcd --voxel-size 0.1
+./voxel_grid_type --input path/to/pointcloud.pcd --output downsampled.pcd --voxel-size 0.1
 ```
+
+## Features
+- Voxel-based point cloud downsampling
+- Hardware-accelerated point cloud processing
+- Dynamic workload distribution between CPU and GPU
+
+## Contributors
+- BUSE NUR İLERİ
+- MAHMUT ESAT ÖZHÖLÇEK
+- AZİZ ÖNDER
