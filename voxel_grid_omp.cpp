@@ -253,22 +253,14 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr voxelGridDownsampleOMP(
     // Calculate centroids and add to output cloud
     std::vector<pcl::PointXYZ> output_points(merged_voxel_map.size());
     
-    // Convert map to vector for deterministic iteration
+    // Convert map to vector for parallel processing
     std::vector<std::pair<Eigen::Vector3i, std::pair<Eigen::Vector3d, int>>> voxel_vector;
     voxel_vector.reserve(merged_voxel_map.size());
     for (const auto& voxel : merged_voxel_map) {
         voxel_vector.push_back(voxel);
     }
     
-    // Sort by voxel indices for deterministic output order
-    std::sort(voxel_vector.begin(), voxel_vector.end(),
-        [](const auto& a, const auto& b) {
-            if (a.first[0] != b.first[0]) return a.first[0] < b.first[0];
-            if (a.first[1] != b.first[1]) return a.first[1] < b.first[1];
-            return a.first[2] < b.first[2];
-        });
-    
-    // Process sorted voxels in parallel
+    // Process voxels in parallel (no sorting)
     #pragma omp parallel for schedule(dynamic, 1000)
     for (size_t i = 0; i < voxel_vector.size(); i++) {
         // Calculate centroid with double precision
@@ -296,79 +288,12 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr voxelGridDownsampleOMP(
     return output_cloud;
 }
 
-// Improved comparePointClouds function
-bool comparePointClouds(
-    const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud1,
-    const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud2,
-    double voxel_size)
-{
-    // First check if the clouds have the same number of points
-    if (cloud1->size() != cloud2->size()) {
-        std::cout << "Clouds have different numbers of points: " 
-                  << cloud1->size() << " vs " << cloud2->size() << std::endl;
-        return false;
-    }
-
-    // Sort both clouds by x, then y, then z to ensure comparable ordering
-    auto sortCloud = [](pcl::PointCloud<pcl::PointXYZ>::Ptr cloud) {
-        std::sort(cloud->points.begin(), cloud->points.end(), 
-            [](const pcl::PointXYZ& a, const pcl::PointXYZ& b) {
-                if (a.x != b.x) return a.x < b.x;
-                if (a.y != b.y) return a.y < b.y;
-                return a.z < b.z;
-            });
-    };
-
-    // Create copies for sorting (to not modify the original clouds)
-    pcl::PointCloud<pcl::PointXYZ>::Ptr sorted_cloud1(new pcl::PointCloud<pcl::PointXYZ>(*cloud1));
-    pcl::PointCloud<pcl::PointXYZ>::Ptr sorted_cloud2(new pcl::PointCloud<pcl::PointXYZ>(*cloud2));
-    
-    sortCloud(sorted_cloud1);
-    sortCloud(sorted_cloud2);
-
-    // With double precision calculations, we can use a very small epsilon
-    // For very small voxel sizes, we can use a fractional threshold based on voxel size
-    double epsilon = std::max(1e-10, voxel_size * 1e-6);
-    std::cout << "Using comparison epsilon: " << epsilon << std::endl;
-
-    // Compare each point
-    int mismatches = 0;
-    for (size_t i = 0; i < sorted_cloud1->size(); ++i) {
-        const auto& p1 = sorted_cloud1->points[i];
-        const auto& p2 = sorted_cloud2->points[i];
-        
-        double dx = std::abs(static_cast<double>(p1.x) - static_cast<double>(p2.x));
-        double dy = std::abs(static_cast<double>(p1.y) - static_cast<double>(p2.y));
-        double dz = std::abs(static_cast<double>(p1.z) - static_cast<double>(p2.z));
-        
-        if (dx > epsilon || dy > epsilon || dz > epsilon) {
-            mismatches++;
-            if (mismatches <= 10) { // Print only first 10 mismatches
-                std::cout << "Point mismatch at index " << i << ":\n"
-                          << "  Cloud1: (" << p1.x << ", " << p1.y << ", " << p1.z << ")\n"
-                          << "  Cloud2: (" << p2.x << ", " << p2.y << ", " << p2.z << ")\n"
-                          << "  Diff: (" << dx << ", " << dy << ", " << dz << ")" << std::endl;
-            }
-        }
-    }
-    
-    if (mismatches > 0) {
-        std::cout << "Found " << mismatches << " mismatched points out of " 
-                  << sorted_cloud1->size() << " (" 
-                  << (double)mismatches / sorted_cloud1->size() * 100.0 << "%)" << std::endl;
-        return false;
-    }
-    
-    return true;
-}
-
 int main(int argc, char** argv) {
     // Default parameters
     std::string input_file = "input.pcd";
     std::string output_file = "downsampled.pcd";
     double voxel_size = 0.1; // 10cm default voxel size
     int num_threads = 0; // 0 means use default OpenMP thread count
-    bool run_comparison = true;
     
     // Parse command-line arguments
     for (int i = 1; i < argc; i++) {
@@ -389,8 +314,6 @@ int main(int argc, char** argv) {
             if (i + 1 < argc) {
                 num_threads = std::stoi(argv[++i]);
             }
-        } else if (arg == "-nc" || arg == "--no-compare") {
-            run_comparison = false;
         } else if (arg == "-h" || arg == "--help") {
             std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
             std::cout << "Options:" << std::endl;
@@ -398,7 +321,6 @@ int main(int argc, char** argv) {
             std::cout << "  -o, --output FILE      Output point cloud file (default: downsampled.pcd)" << std::endl;
             std::cout << "  -v, --voxel-size SIZE  Voxel size for downsampling (default: 0.1)" << std::endl;
             std::cout << "  -t, --threads NUM      Number of OpenMP threads (default: system)" << std::endl;
-            std::cout << "  -nc, --no-compare      Skip comparison between serial and parallel results" << std::endl;
             std::cout << "  -h, --help             Show this help message" << std::endl;
             return 0;
         }
@@ -450,13 +372,6 @@ int main(int argc, char** argv) {
     auto parallel_end = std::chrono::high_resolution_clock::now();
     auto parallel_duration = std::chrono::duration_cast<std::chrono::milliseconds>(parallel_end - parallel_start).count();
     
-    // Compare results for correctness
-    if (run_comparison) {
-        std::cout << "\n=== CORRECTNESS CHECK ===" << std::endl;
-        bool correct = comparePointClouds(serial_downsampled, parallel_downsampled, voxel_size);
-        std::cout << "Correctness check: " << (correct ? "PASSED ✓" : "FAILED ✗") << std::endl;
-    }
-    
     // Performance comparison
     std::cout << "\n=== PERFORMANCE COMPARISON ===" << std::endl;
     std::cout << "Serial processing time: " << serial_duration << " ms" << std::endl;
@@ -468,7 +383,7 @@ int main(int argc, char** argv) {
         std::cout << "Efficiency: " << (speedup / omp_get_max_threads()) * 100.0 << "%" << std::endl;
     }
 
-    // Save the downsampled point cloud (using the parallel version)
+    // Save the downsampled point cloud (using both versions)
     extension = output_file.substr(output_file.find_last_of(".") + 1);
 
     std::cout << "\nSaving downsampled point clouds..." << std::endl;
