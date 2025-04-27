@@ -40,7 +40,7 @@ endif()
 
 
 # CUDA version
-find_package(CUDA REQUIRED)
+find_package(CUDA)
 if(CUDA_FOUND)
     message(STATUS "CUDA found. Enabling CUDA support.")
     enable_language(CUDA)
