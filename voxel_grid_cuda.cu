@@ -8,6 +8,7 @@
 #include <pcl/io/ply_io.h>
 #include <pcl/common/common.h>
 #include <Eigen/Core>
+#include <algorithm> // std::sort için
 
 // CUDA includes
 #include <cuda_runtime.h>
@@ -23,6 +24,28 @@ do { \
         exit(EXIT_FAILURE); \
     } \
 } while(0)
+
+// Hash combine fonksiyonu - Eksik olan bu fonksiyon eklendi
+template <typename T>
+__host__ __device__ 
+size_t hash_combine(size_t seed, const T& v) {
+    return seed ^ (std::hash<T>()(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+}
+
+// CUDA'da std::hash yerine basit bir hash fonksiyonu
+__device__ 
+size_t hash_int(int val) {
+    val = ((val >> 16) ^ val) * 0x45d9f3b;
+    val = ((val >> 16) ^ val) * 0x45d9f3b;
+    val = (val >> 16) ^ val;
+    return val;
+}
+
+// CUDA için hash_combine yardımcı fonksiyonu
+__device__ 
+size_t cuda_hash_combine(size_t seed, int val) {
+    return seed ^ (hash_int(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+}
 
 // Structure to hold point data for CUDA processing
 struct PointData {
@@ -59,7 +82,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr voxelGridDownsample(
     
     std::unordered_map<int64_t, std::vector<size_t>> voxel_map;
     
-    // First pass: Group points by voxel
+    // CPU implementasyonunda (voxelGridDownsample fonksiyonu içinde)
     for (size_t i = 0; i < input_cloud->size(); ++i) {
         const auto& point = input_cloud->points[i];
         
@@ -73,12 +96,17 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr voxelGridDownsample(
         int voxel_y = static_cast<int>(std::floor(point.y / voxel_size));
         int voxel_z = static_cast<int>(std::floor(point.z / voxel_size));
         
-        // Create a combined index using bit shifting
-        int64_t voxel_idx = ((int64_t)voxel_x << 40) | ((int64_t)voxel_y << 20) | (int64_t)voxel_z;
+        // Hash fonksiyonu kullanarak voxel indeksini oluştur
+        size_t combined_idx = 0;
+        combined_idx = hash_combine(combined_idx, voxel_x);
+        combined_idx = hash_combine(combined_idx, voxel_y);
+        combined_idx = hash_combine(combined_idx, voxel_z);
+        
+        // Voxel indeksi olarak kullan
+        int64_t voxel_idx = static_cast<int64_t>(combined_idx);
         
         voxel_map[voxel_idx].push_back(i);
     }
-    
     // Second pass: Calculate centroids
     output_cloud->points.reserve(voxel_map.size());
     
@@ -138,10 +166,16 @@ __global__ void computeVoxelIndices(
             int voxel_y = static_cast<int>(floorf(y / voxel_size));
             int voxel_z = static_cast<int>(floorf(z / voxel_size));
             
-            // Create a combined index using bit shifting
-            int64_t combined_idx = ((int64_t)voxel_x << 40) | ((int64_t)voxel_y << 20) | (int64_t)voxel_z;
+            // CUDA için hash_combine fonksiyonu kullanarak voxel indeksini oluştur
+            size_t combined_idx = 0;
+            combined_idx = cuda_hash_combine(combined_idx, voxel_x);
+            combined_idx = cuda_hash_combine(combined_idx, voxel_y);
+            combined_idx = cuda_hash_combine(combined_idx, voxel_z);
             
-            voxel_data[idx].voxel_idx = combined_idx;
+            // int64_t tipine dönüştür (gerekirse)
+            int64_t voxel_idx = static_cast<int64_t>(combined_idx);
+            
+            voxel_data[idx].voxel_idx = voxel_idx;
             voxel_data[idx].x = x;
             voxel_data[idx].y = y;
             voxel_data[idx].z = z;
@@ -259,10 +293,10 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr voxelGridDownsampleCUDA(
     }
     
     // Sort by voxel index using CPU
-    std::sort(valid_voxels.begin(), valid_voxels.end(), 
-              [](const VoxelData& a, const VoxelData& b) {
-                  return a.voxel_idx < b.voxel_idx;
-              });
+    //std::sort(valid_voxels.begin(), valid_voxels.end(), 
+             // [](const VoxelData& a, const VoxelData& b) {
+                 // return a.voxel_idx < b.voxel_idx;
+              //});
     
     // Compute centroids for each voxel
     std::vector<pcl::PointXYZ> centroids;
