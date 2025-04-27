@@ -293,10 +293,10 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr voxelGridDownsampleCUDA(
     }
     
     // Sort by voxel index using CPU
-    //std::sort(valid_voxels.begin(), valid_voxels.end(), 
-             // [](const VoxelData& a, const VoxelData& b) {
-                 // return a.voxel_idx < b.voxel_idx;
-              //});
+    std::sort(valid_voxels.begin(), valid_voxels.end(), 
+             [](const VoxelData& a, const VoxelData& b) {
+                 return a.voxel_idx < b.voxel_idx;
+              });
     
     // Compute centroids for each voxel
     std::vector<pcl::PointXYZ> centroids;
