@@ -4,6 +4,7 @@ project(VoxelGrid_Downsampling)
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall -march=native")
 
 # Find required packages
 find_package(PCL 1.8 REQUIRED)

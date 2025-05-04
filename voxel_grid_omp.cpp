@@ -153,139 +153,111 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr voxelGridDownsample(
     return output_cloud;
 }
 
-// OpenMP parallelized VoxelGrid downsample function with double precision
-pcl::PointCloud<pcl::PointXYZ>::Ptr voxelGridDownsampleOMP(
-    const pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud, 
-    double voxel_size,
-    int num_threads = 0) 
+
+
+// Helper: linear index calculator
+inline size_t linear_idx(const Eigen::Vector3i& ijk,
+    const Eigen::Vector3i& div)
 {
-    auto start = std::chrono::high_resolution_clock::now();
-    
-    // Create output cloud
-    pcl::PointCloud<pcl::PointXYZ>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    
-    if (input_cloud->empty() || voxel_size <= 0) {
-        std::cerr << "Invalid input cloud or voxel size!" << std::endl;
-        return output_cloud;
-    }
+return static_cast<size_t>(ijk[0] +
+          ijk[1] * div[0] +
+          ijk[2] * div[0] * div[1]);
+}
 
-    // Set number of threads if specified
-    if (num_threads > 0) {
-        omp_set_num_threads(num_threads);
-    }
-    
-    int max_threads = omp_get_max_threads();
-    std::cout << "Using " << max_threads << " threads for parallel processing" << std::endl;
 
-    // Determine minimum and maximum points for our bounding box if voxel origin not set
-    if (!g_voxel_origin_set) {
-        Eigen::Vector4f min_point_f, max_point_f;
-        pcl::getMinMax3D(*input_cloud, min_point_f, max_point_f);
-        g_voxel_origin = Eigen::Vector3d(min_point_f[0], min_point_f[1], min_point_f[2]);
-        g_voxel_origin_set = true;
-    }
+pcl::PointCloud<pcl::PointXYZ>::Ptr
+voxelGridDownsampleOMP(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
+                       double leaf,
+                       int threads = 0)
+{
+    auto t0 = std::chrono::high_resolution_clock::now();
+
+    if (cloud->empty() || leaf <= 0)
+        return {};
+
+    if (threads > 0)
+        omp_set_num_threads(threads);
+
     
-    // Use the global voxel origin for consistency between runs and implementations
-    const Eigen::Vector3d& voxel_origin = g_voxel_origin;
+    std::cout << "Using " << omp_get_num_threads() << " threads for parallel processing" << std::endl;
+
+
+    // Bounding box
+    Eigen::Vector4f min4f, max4f;
+    pcl::getMinMax3D(*cloud, min4f, max4f);
+    Eigen::Vector3d min_pt(min4f[0], min4f[1], min4f[2]);
+
+    const Eigen::Vector3d& voxel_origin = min_pt;
     std::cout << "Using voxel origin: [" << voxel_origin[0] << ", " << voxel_origin[1] << ", " << voxel_origin[2] << "]" << std::endl;
 
-    // Each thread has its own voxel map to avoid contention
-    std::vector<VoxelMap> thread_voxel_maps(max_threads);
-    
-    // Process points in parallel
-    #pragma omp parallel
+    // Number of cells per axis
+    Eigen::Vector3i div(
+        static_cast<int>((max4f[0] - min4f[0]) / leaf) + 1,
+        static_cast<int>((max4f[1] - min4f[1]) / leaf) + 1,
+        static_cast<int>((max4f[2] - min4f[2]) / leaf) + 1);
+
+    size_t voxel_count = static_cast<size_t>(div[0]) * div[1] * div[2];
+
+    // Accumulation vectors
+    std::vector<Eigen::Vector3d> sum(voxel_count, Eigen::Vector3d::Zero());
+    std::vector<uint32_t>        cnt(voxel_count, 0);
+
+    double inv_leaf = 1.0 / leaf;
+
+    // ---------- PASS‑1: accumulation ----------
+    #pragma omp parallel for schedule(static, 4096)
+    for (std::size_t i = 0; i < cloud->points.size(); ++i)
     {
-        int thread_id = omp_get_thread_num();
-        auto& local_voxel_map = thread_voxel_maps[thread_id];
-        
-        #pragma omp for schedule(dynamic, 1000)
-        for (size_t i = 0; i < input_cloud->points.size(); i++) {
-            const auto& point = input_cloud->points[i];
-            
-            // Skip NaN points
-            if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) {
-                continue;
-            }
+        const auto& p = cloud->points[i];
+        if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z))
+            continue;
 
-            // Calculate voxel indices for this point using the helper function
-            Eigen::Vector3i voxel_idx = calculateVoxelIndices(point, voxel_size, voxel_origin);
-            
-            // Store point with double precision
-            Eigen::Vector3d point_vector(static_cast<double>(point.x), 
-                                        static_cast<double>(point.y), 
-                                        static_cast<double>(point.z));
+        Eigen::Vector3i ijk(
+            static_cast<int>((p.x - min_pt[0]) * inv_leaf),
+            static_cast<int>((p.y - min_pt[1]) * inv_leaf),
+            static_cast<int>((p.z - min_pt[2]) * inv_leaf));
 
-            // Add point to thread's local voxel map
-            auto voxel_iter = local_voxel_map.find(voxel_idx);
-            if (voxel_iter != local_voxel_map.end()) {
-                // Voxel exists, update sum and count
-                voxel_iter->second.first += point_vector;
-                voxel_iter->second.second++;
-            } else {
-                // New voxel, initialize with this point
-                local_voxel_map[voxel_idx] = std::make_pair(point_vector, 1);
-            }
+        size_t idx = linear_idx(ijk, div);
+
+        // Atomic updates
+        #pragma omp atomic update
+        sum[idx][0] += p.x;
+        #pragma omp atomic update
+        sum[idx][1] += p.y;
+        #pragma omp atomic update
+        sum[idx][2] += p.z;
+        #pragma omp atomic update
+        cnt[idx] += 1;
+    }
+
+    // ---------- PASS‑2: output cloud ----------
+    auto cloud_out = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    cloud_out->reserve(voxel_count);           // upper bound
+    for (size_t i = 0; i < voxel_count; ++i)
+        if (cnt[i] != 0)
+        {
+            double inv = 1.0 / static_cast<double>(cnt[i]);
+            pcl::PointXYZ q;
+            q.x = static_cast<float>(sum[i][0] * inv);
+            q.y = static_cast<float>(sum[i][1] * inv);
+            q.z = static_cast<float>(sum[i][2] * inv);
+            cloud_out->push_back(q);
         }
-    }
 
-    // Merge thread-local voxel maps
-    VoxelMap merged_voxel_map;
-    for (const auto& local_map : thread_voxel_maps) {
-        for (const auto& voxel : local_map) {
-            auto merged_iter = merged_voxel_map.find(voxel.first);
-            if (merged_iter != merged_voxel_map.end()) {
-                // Voxel exists in merged map, combine results
-                merged_iter->second.first += voxel.second.first;
-                merged_iter->second.second += voxel.second.second;
-            } else {
-                // New voxel in merged map
-                merged_voxel_map[voxel.first] = voxel.second;
-            }
-        }
-    }
+    cloud_out->width    = cloud_out->size();
+    cloud_out->height   = 1;
+    cloud_out->is_dense = true;
 
-    // Prepare output cloud
-    output_cloud->points.reserve(merged_voxel_map.size());
-    output_cloud->width = merged_voxel_map.size();
-    output_cloud->height = 1;
-    output_cloud->is_dense = true;
-
-    // Calculate centroids and add to output cloud
-    std::vector<pcl::PointXYZ> output_points(merged_voxel_map.size());
-    
-    // Convert map to vector for parallel processing
-    std::vector<std::pair<Eigen::Vector3i, std::pair<Eigen::Vector3d, int>>> voxel_vector;
-    voxel_vector.reserve(merged_voxel_map.size());
-    for (const auto& voxel : merged_voxel_map) {
-        voxel_vector.push_back(voxel);
-    }
-    
-    // Process voxels in parallel (no sorting)
-    #pragma omp parallel for schedule(dynamic, 1000)
-    for (size_t i = 0; i < voxel_vector.size(); i++) {
-        // Calculate centroid with double precision
-        Eigen::Vector3d centroid = voxel_vector[i].second.first / static_cast<double>(voxel_vector[i].second.second);
-        
-        // Convert back to float for PCL point
-        pcl::PointXYZ new_point;
-        new_point.x = static_cast<float>(centroid[0]);
-        new_point.y = static_cast<float>(centroid[1]);
-        new_point.z = static_cast<float>(centroid[2]);
-        output_points[i] = new_point;
-    }
-    
-    // Add all points to output cloud
-    output_cloud->points.insert(output_cloud->points.end(), output_points.begin(), output_points.end());
-
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    auto t1 = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
     
     std::cout << "OMP Parallel VoxelGrid downsampling completed in " << duration << " ms" << std::endl;
-    std::cout << "Points before: " << input_cloud->size() << std::endl;
-    std::cout << "Points after: " << output_cloud->size() << std::endl;
-    std::cout << "Reduction ratio: " << (1.0 - static_cast<double>(output_cloud->size()) / static_cast<double>(input_cloud->size())) * 100.0 << "%" << std::endl;
-    
-    return output_cloud;
+    std::cout << "Points before: " << cloud->size() << std::endl;
+    std::cout << "Points after: " << cloud_out->size() << std::endl;
+    std::cout << "Reduction ratio: " << (1.0 - static_cast<double>(cloud_out->size()) / static_cast<double>(cloud->size())) * 100.0 << "%" << std::endl;
+   
+
+    return cloud_out;
 }
 
 int main(int argc, char** argv) {
